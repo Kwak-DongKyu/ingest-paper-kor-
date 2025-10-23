@@ -20,6 +20,12 @@ git clone https://github.com/Kwak-DongKyu/ingest-paper-kor-.git
 - 터미널에서 설치된 폴더로 이동
 
 ```bash
+cd ingest-paper-kor-
+```
+
+
+
+```bash
 # (권장) 가상환경
 python -m venv .venv
 
@@ -34,7 +40,7 @@ pip install -r requirements.txt
 
 
 ## 3) Notion API 찾는 법 
-.env 파일의 아래 두 가지 항목을 채워야 함. 
+[.env](./.env) 파일의 아래 두 가지 항목을 채워야 함. 
 3.1 NOTION_TOKEN
 3.2 NOTION_DATABASE_ID
 
@@ -51,7 +57,7 @@ https://www.notion.so/profile/integrations
 (내 데이터베이스가 있는 노션 페이지를 설정하면 됨)
 ![Notion-Database 페이지](Image/notion2.png)
 
-**3.2 (NOTION_DATABASES_ID) 위 연동해둔 페이지 내에 데이터베이스(표) 를 만들고 링크를 .env-NOTION_DATABASE_ID 항목에 입력** 
+**3.2 (NOTION_DATABASES_ID) 위 연동해둔 페이지 내에 데이터베이스(표) 를 만들고 링크를 .env파일 내의 변수 NOTION_DATABASE_ID에 입력** 
 ![Notion database 페이지](Image/notion3.png)
 
 데이터베이스 링크 복사 시 형태는 https://www.notion.so/1111111111111?v=222222222&source=copy_link 형태이며 1111 부분만 복제하여
@@ -62,10 +68,11 @@ https://www.notion.so/profile/integrations
 **.env 파일 내의 OPENAI_API_KEY 부분을 채워야함**
 - 아래 사이트에서 새로 생성 후 결제 수단 등록 및 일정 금액 충전되어야 함.
 https://platform.openai.com/api-keys
+- gpt 의 모델은 .env 파일 내에서 변경 가능
 
 
 ## 5) Demo
-- 입력: `Paper` 폴더 안에 분석할 PDF를 삽입
+- 입력: [Paper](./Paper/) 폴더 안에 분석할 PDF를 삽입
 - 터미널에서 아래 ingest_paper.py 실행
 
 ```bash
@@ -75,10 +82,17 @@ python ingest_paper.py
 ---
 
 **5.1 예시** 
-현재 첨부되어 있는 pdf(wrimoucon)을 넣었을 때 
+현재 첨부되어 있는 [pdf(wrimoucon)](./Paper/wrimoucon.pdf)를 넣었을 때 
 
 ![AI AGENT 결과 예시](Image/example_wrimoucon.pdf)
 
 
-## 6) 커스터마이징
-ingest_paper.py 파일 내의 call_gpt_contents 내의 프롬프트를 변경함으로써 원하는 내용 생성으로 변경 가능. 
+## 6) 체크사항
+[ ] 생성한 Notion API 에 데이터베이스가 있는 노션 페이지 권한을 제공하였는가?
+[ ] 데이터베이스 링크 주소를 적절하게 .env-NOTION_DATABSE_ID 에 입력하였는가?
+[ ] 유효한 OPENAI_API_KEY 를 사용하였는가?
+
+
+
+## 7) 커스터마이징
+[ingest_paper.py](/ingest_paper.py) 파일 내의 call_gpt_contents 내의 프롬프트를 변경함으로써 원하는 내용 생성으로 변경 가능. 
