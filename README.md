@@ -34,19 +34,46 @@ pip install -r requirements.txt
 
 
 ### Notion API 찾는 법 
-- 아래 사이트에서 API 키 발급 및 데이터베이스를 수정할 권한을 부여해야 함. 
+1. 아래 사이트에서 API 키 발급 및 데이터베이스를 수정할 권한을 부여해야 함. 
+
 
 https://www.notion.so/profile/integrations
 
-![Notion Integrations 페이지](Image/notion1png)
+- 새 API 통합 버튼 클릭
+![Notion Integrations 페이지](Image/notion1.png)
 
 이후 API 와 내 페이지 내의 데이터베이스와 연동 시켜야 함. 
-
+- 생성 API 클릭 -> 사용 권한 -> 편집 권한 부여
+(내 데이터베이스가 있는 노션 페이지를 설정하면 됨)
 ![Notion-Database 페이지](Image/notion2.png)
+
+2. 위 연동해둔 페이지 내에 데이터베이스(표) 를 만들고 링크를 .env 파일에 입력 
+![Notion database 페이지](Image/notion3.png)
+
+ex) 링크 복사 시 형태는 https://www.notion.so/1111111111111?v=222222222&source=copy_link 형태이며 1111 부분만 복제하여
+.env 파일의 NOTION_DATABASE_ID 항목에 입력
+
+
+### GPT API 발급 방법
+- 아래 사이트에서 새로 생성 후 결제 수단 등록 및 일정 금액 충전되어야 함.
+https://platform.openai.com/api-keys
 
 
 ## Demo
-- 입력: `paper_pdf/` 폴더 안의 PDF들
-- 출력: Notion DB의 새 페이지(상단: 논문 URL → PDF → Figure 1 → 섹션/피겨 섞기)
+- 입력: `paper/` 폴더 안에 분석할 PDF를 삽입
+- 터미널에서 아래 ingest_paper.py 실행
+
+```bash
+python ingest_paper.py
+```
 
 ---
+
+### 예시 
+현재 첨부되어 있는 pdf(wrimoucon)을 넣었을 때 
+
+![AI AGENT 결과 예시](Image/example_wrimoucon.pdf)
+
+
+### 커스터마이징
+ingest_paper.py 파일 내의 call_gpt_contents 내의 프롬프트를 변경함으로써 원하는 내용 생성으로 변경 가능. 
