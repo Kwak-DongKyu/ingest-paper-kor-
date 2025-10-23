@@ -89,7 +89,7 @@ python ingest_paper.py
 
 ## 6) 체크사항
 - [ ] 생성한 Notion API 에 데이터베이스가 있는 노션 페이지 권한을 제공하였는가?
-- [ ] 데이터베이스 링크 주소를 적절하게 .env-NOTION_DATABSE_ID 에 입력하였는가?
+- [ ] 데이터베이스 링크 주소를 적절하게 [.env](/.env) 파일의 변수 NOTION_DATABSE_ID 에 입력하였는가?
 - [ ] 유효한 OPENAI_API_KEY 를 사용하였는가?
 
 
