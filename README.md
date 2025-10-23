@@ -34,14 +34,15 @@ pip install -r requirements.txt
 
 
 ### Notion API 찾는 법 
+- 아래 사이트에서 API 키 발급 및 데이터베이스를 수정할 권한을 부여해야 함. 
 
 https://www.notion.so/profile/integrations
 
-![Notion Integrations 페이지](Image/notion api 통합.png)
+![Notion Integrations 페이지](Image/notion1png)
 
 이후 API 와 내 페이지 내의 데이터베이스와 연동 시켜야 함. 
 
-![Notion-Database 페이지](Image/notion api 사용권한.png)
+![Notion-Database 페이지](Image/notion2.png)
 
 
 ## Demo
