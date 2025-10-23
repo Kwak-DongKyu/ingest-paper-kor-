@@ -39,26 +39,27 @@ pip install -r requirements.txt
 3.2 NOTION_DATABASE_ID
 
 
-3.1 아래 사이트에서 API 키 발급 및 데이터베이스를 수정할 권한을 부여해야 함. 
+**3.1 (NOTION_TOKEN) 아래 사이트에서 API 키 발급 및 데이터베이스를 수정할 권한을 부여해야 함.** 
 https://www.notion.so/profile/integrations
 
 - 새 API 통합 버튼 클릭
 - 이후 생성된 API 키를 .env 파일의 NOTION_TOKEN 에 입력
 ![Notion Integrations 페이지](Image/notion1.png)
 
-### 이후 API 와 내 페이지 내의 데이터베이스와 연동 시켜야 함. 
+**이후 API 와 내 페이지 내의 데이터베이스와 연동 시켜야 함.** 
 - 생성 API 클릭 -> 사용 권한 -> 편집 권한 부여
 (내 데이터베이스가 있는 노션 페이지를 설정하면 됨)
 ![Notion-Database 페이지](Image/notion2.png)
 
-3.2 위 연동해둔 페이지 내에 데이터베이스(표) 를 만들고 링크를 .env-NOTION_DATABASE_ID 항목에 입력 
+**3.2 (NOTION_DATABASES_ID) 위 연동해둔 페이지 내에 데이터베이스(표) 를 만들고 링크를 .env-NOTION_DATABASE_ID 항목에 입력** 
 ![Notion database 페이지](Image/notion3.png)
 
-ex) 링크 복사 시 형태는 https://www.notion.so/1111111111111?v=222222222&source=copy_link 형태이며 1111 부분만 복제하여
+데이터베이스 링크 복사 시 형태는 https://www.notion.so/1111111111111?v=222222222&source=copy_link 형태이며 1111 부분만 복제하여
 .env 파일의 NOTION_DATABASE_ID 항목에 입력
 
 
 ## 4) GPT API 발급 방법
+
 - 아래 사이트에서 새로 생성 후 결제 수단 등록 및 일정 금액 충전되어야 함.
 https://platform.openai.com/api-keys
 
