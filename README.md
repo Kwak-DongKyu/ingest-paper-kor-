@@ -82,7 +82,7 @@ python ingest_paper.py
 ---
 
 **5.1 예시** 
-현재 첨부되어 있는 [pdf(wrimoucon)](./Paper/wrimoucon.pdf)를 넣었을 때 
+현재 첨부되어 있는 [pdf(wrimoucon)](./Image/example_wrimoucon.pdf)를 넣었을 때 
 
 ![AI AGENT 결과 예시](Image/example_wrimoucon.pdf)
 
