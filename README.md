@@ -17,16 +17,18 @@
 ```bash
 git clone https://github.com/Kwak-DongKyu/ingest-paper-kor-.git
 ```
-- 설치된 폴더로 이동
+- 터미널에서 설치된 폴더로 이동
 
 ```bash
 # (권장) 가상환경
 python -m venv .venv
-# macOS/Linux
+
+# macOS/Linux 일 경우
 source .venv/bin/activate
-# Windows PowerShell
+# Windows PowerShell 일 경우
 .venv\Scripts\Activate.ps1
 
+# 필수 패키지들 다운로드 
 pip install -r requirements.txt
 ```
 ## Demo

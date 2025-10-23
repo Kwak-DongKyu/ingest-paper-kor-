@@ -751,7 +751,7 @@ def process_pdf(path: str):
 
 # 12) Entry
 def main():
-    pdf_dir = os.path.join(os.getcwd(), "paper_pdf")
+    pdf_dir = os.path.join(os.getcwd(), "paper")
     if not os.path.isdir(pdf_dir):
         print(f"❌ 폴더가 없습니다: {pdf_dir}")
         sys.exit(1)
