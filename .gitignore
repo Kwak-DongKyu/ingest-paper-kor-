@@ -1,0 +1,13 @@
+# 환경/비밀
+.env
+*.env
+# 파이썬/빌드
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.build/
+dist/
+# 실행 산출물
+paper_pdf/*.pdf
+_figures/
