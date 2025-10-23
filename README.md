@@ -33,13 +33,12 @@ pip install -r requirements.txt
 ```
 
 
-### Notion API 찾는 법 
-1. 아래 사이트에서 API 키 발급 및 데이터베이스를 수정할 권한을 부여해야 함. 
-
-
+## 3) Notion API 찾는 법 
+3.1 아래 사이트에서 API 키 발급 및 데이터베이스를 수정할 권한을 부여해야 함. 
 https://www.notion.so/profile/integrations
 
 - 새 API 통합 버튼 클릭
+- 이후 생성된 API 키를 .env 파일의 NOTION_TOKEN 에 입력
 ![Notion Integrations 페이지](Image/notion1.png)
 
 이후 API 와 내 페이지 내의 데이터베이스와 연동 시켜야 함. 
@@ -47,19 +46,19 @@ https://www.notion.so/profile/integrations
 (내 데이터베이스가 있는 노션 페이지를 설정하면 됨)
 ![Notion-Database 페이지](Image/notion2.png)
 
-2. 위 연동해둔 페이지 내에 데이터베이스(표) 를 만들고 링크를 .env 파일에 입력 
+3.2 위 연동해둔 페이지 내에 데이터베이스(표) 를 만들고 링크를 .env 파일에 입력 
 ![Notion database 페이지](Image/notion3.png)
 
 ex) 링크 복사 시 형태는 https://www.notion.so/1111111111111?v=222222222&source=copy_link 형태이며 1111 부분만 복제하여
 .env 파일의 NOTION_DATABASE_ID 항목에 입력
 
 
-### GPT API 발급 방법
+## 4) GPT API 발급 방법
 - 아래 사이트에서 새로 생성 후 결제 수단 등록 및 일정 금액 충전되어야 함.
 https://platform.openai.com/api-keys
 
 
-## Demo
+## 5) Demo
 - 입력: `paper/` 폴더 안에 분석할 PDF를 삽입
 - 터미널에서 아래 ingest_paper.py 실행
 
@@ -69,11 +68,11 @@ python ingest_paper.py
 
 ---
 
-### 예시 
+### 5.1 예시 
 현재 첨부되어 있는 pdf(wrimoucon)을 넣었을 때 
 
 ![AI AGENT 결과 예시](Image/example_wrimoucon.pdf)
 
 
-### 커스터마이징
+## 6) 커스터마이징
 ingest_paper.py 파일 내의 call_gpt_contents 내의 프롬프트를 변경함으로써 원하는 내용 생성으로 변경 가능. 
