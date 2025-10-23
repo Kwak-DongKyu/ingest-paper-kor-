@@ -1,15 +1,9 @@
-# Ingest Papers to Notion (PDF → GPT Summary → Notion)
+# Paper Summary AI Agent
 
 논문 PDF를 넣으면:
-1) GPT로 메타데이터/요약/한줄요약 생성  
-2) PDF/피겨(캡션 포함) 추출 후 **Notion 페이지**에 업로드  
-3) 논문 URL(doi/arXiv/semantic scholar) 북마크 + 섹션/피겨 **자동 배치**
+1) AI agent 기반의 논문 요약 
+2) 논문의 피겨를 포함 하여 배치 
 
-## Demo
-- 입력: `paper_pdf/` 폴더 안의 PDF들
-- 출력: Notion DB의 새 페이지(상단: 논문 URL → PDF → Figure 1 → 섹션/피겨 섞기)
-
----
 
 ## 1) 요구사항
 - Python 3.10+
@@ -21,14 +15,22 @@
 ## 2) 설치
 
 ```bash
-git clone https://github.com/<yourname>/ingest-papers.git
-cd ingest-papers
+git clone https://github.com/Kwak-DongKyu/ingest-paper-kor-.git
+```
+- 설치된 폴더로 이동
 
+```bash
 # (권장) 가상환경
 python -m venv .venv
 # macOS/Linux
 source .venv/bin/activate
 # Windows PowerShell
-# .venv\Scripts\Activate.ps1
+.venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
+```
+## Demo
+- 입력: `paper_pdf/` 폴더 안의 PDF들
+- 출력: Notion DB의 새 페이지(상단: 논문 URL → PDF → Figure 1 → 섹션/피겨 섞기)
+
+---
