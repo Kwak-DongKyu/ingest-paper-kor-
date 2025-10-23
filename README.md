@@ -59,13 +59,13 @@ https://www.notion.so/profile/integrations
 
 
 ## 4) GPT API 발급 방법
-
+**.env 파일 내의 OPENAI_API_KEY 부분을 채워야함**
 - 아래 사이트에서 새로 생성 후 결제 수단 등록 및 일정 금액 충전되어야 함.
 https://platform.openai.com/api-keys
 
 
 ## 5) Demo
-- 입력: `paper/` 폴더 안에 분석할 PDF를 삽입
+- 입력: `Paper` 폴더 안에 분석할 PDF를 삽입
 - 터미널에서 아래 ingest_paper.py 실행
 
 ```bash
@@ -74,7 +74,7 @@ python ingest_paper.py
 
 ---
 
-### 5.1 예시 
+**5.1 예시** 
 현재 첨부되어 있는 pdf(wrimoucon)을 넣었을 때 
 
 ![AI AGENT 결과 예시](Image/example_wrimoucon.pdf)
