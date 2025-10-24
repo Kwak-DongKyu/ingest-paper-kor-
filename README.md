@@ -39,11 +39,7 @@ pip install -r requirements.txt
 ```
 
 
-## 3) Notion API 찾는 법 
-[.env](./.env) 파일의 아래 두 가지 항목을 채워야 함. 
-3.1 NOTION_TOKEN
-3.2 NOTION_DATABASE_ID
-
+## 3) [.env](./.env) 환경변수 NOTION_TOKEN, NOTION_DATABASE_ID 채우는 법
 
 **3.1 (NOTION_TOKEN) 아래 사이트에서 API 키 발급 및 데이터베이스를 수정할 권한을 부여해야 함.** 
 https://www.notion.so/profile/integrations
