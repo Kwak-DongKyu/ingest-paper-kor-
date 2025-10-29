@@ -37,16 +37,24 @@ NOTION_TOKEN   = os.getenv("NOTION_TOKEN")
 DATABASE_ID    = os.getenv("NOTION_DATABASE_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL   = os.getenv("OPENAI_MODEL", "chatgpt-4o-latest")
+USE_GPT_API    = os.getenv("USE_GPT_API", "true").lower() == "true"   # [MODIFIED]
 NOTION_VERSION = "2022-06-28"
-OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "700"))
+OPENAI_MAX_TOKENS_META = int(os.getenv("OPENAI_MAX_TOKENS_META", "700"))
+OPENAI_MAX_TOKENS_CONTENTS = int(os.getenv("OPENAI_MAX_TOKENS_CONTENTS", "2000"))
+OPENAI_MAX_TOKENS_ONESENTENCE = int(os.getenv("OPENAI_MAX_TOKENS_ONESENTENCE", "64"))
+OPENAI_MAX_TOKENS_LAYOUT= int(os.getenv("OPENAI_MAX_TOKENS_LAYOUT", "2000"))
+
+
 _SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
+
+
 
 if not (NOTION_TOKEN and DATABASE_ID and OPENAI_API_KEY):
     print("❌ .env에 NOTION_TOKEN / NOTION_DATABASE_ID / OPENAI_API_KEY가 필요합니다.")
     sys.exit(1)
 
-notion = NotionClient(auth=NOTION_TOKEN)
-oai    = OpenAI(api_key=OPENAI_API_KEY)
+notion = NotionClient(auth=NOTION_TOKEN, notion_version=NOTION_VERSION)
+oai    = OpenAI(api_key=OPENAI_API_KEY) if USE_GPT_API else None      # [MODIFIED]
 
 # ── DB 스키마
 REQUIRED_SCHEMA = {
@@ -66,6 +74,44 @@ ALIASES = {
     "Conference/journal": ["conference/journal", "venue", "conference", "journal", "학회", "저널"],
     "One sentence": ["one sentence", "summary", "short summary", "한줄요약", "요약"],
 }
+
+
+def read_text_file(path: str) -> str:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            s = f.read()
+        # BOM/널 제거 (있어도 깔끔하게)
+        return s.replace("\ufeff", "").replace("\x00", "")
+    except FileNotFoundError:
+        return ""
+
+_PLACEHOLDER_RE = re.compile(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}")
+
+def render_prompt(template_str: str, **vars) -> str:
+    """
+    템플릿 내 {{KEY}} 자리표시자를 vars["KEY"] 값으로 치환.
+    예: render_prompt('Hello {{NAME}}', NAME='world') -> 'Hello world'
+    """
+    def _sub(m):
+        key = m.group(1)
+        if key in vars:
+            return str(vars[key])
+        # 치환값 없으면 원문 유지(디버깅 원하면 여기서 에러/로그 처리)
+        return m.group(0)
+    return _PLACEHOLDER_RE.sub(_sub, template_str)
+
+def load_prompt_from_files(env_key_filename: str, default_filename: str, base_dir: str | None = None) -> str:
+    """
+    .env에서 파일명 키(env_key_filename)로 파일명을 읽고, base_dir(기본 PROMPT_DIR)과 합쳐 내용을 로드.
+    파일 없으면 "" 반환.
+    """
+    if base_dir is None:
+        base_dir = os.getenv("PROMPT_DIR", "./prompts")
+    filename = os.getenv(env_key_filename, default_filename)
+    path = os.path.join(base_dir, filename)
+    return read_text_file(path)
+
+
 
 def s(v): return "" if v is None else str(v)
 
@@ -124,9 +170,9 @@ def ensure_db_property_map(dbid: str) -> dict:
         db = notion.databases.retrieve(dbid)
         props = db.get("properties", {})
         title_key = _find_title_prop_key(db)
+        
     mapping["Title"] = title_key
     used.add(title_key)
-
     # 2) 나머지 원하는 속성 중 이미 있는 것 매칭
     missing_props: dict[str, dict] = {}
     for want_name, meta in REQUIRED_SCHEMA.items():
@@ -148,6 +194,7 @@ def ensure_db_property_map(dbid: str) -> dict:
         notion.databases.update(database_id=dbid, properties=missing_props)
         # 생성 직후 최신 DB 재조회
         db = notion.databases.retrieve(dbid)
+        print(db)
         props = db.get("properties", {})
 
         # 생성된 이름 그대로 매핑
@@ -214,9 +261,95 @@ def read_pdf(path: str, max_chars: int = 40000) -> str:
             if sum(len(t) for t in texts) >= max_chars: break
         text = "\n\n".join(texts)
         text = re.sub(r"[ \t]+"," ", text); text = re.sub(r"\n{3,}","\n\n", text).strip()
-        return text[:max_chars]
+        text = text[:max_chars]
+        # ▶ 백매터 제거
+        text = trim_trailing_backmatter(text)
+        return text
     except Exception as e:
         return f"[PDF READ ERROR] {e}"
+
+def trim_trailing_backmatter(text: str) -> str:
+    """
+    1) 'References/Bibliography/Appendix/Acknowledgments' 같은 헤딩을 찾아 그 지점부터 잘라냄.
+    2) 못 찾으면 하단부에서 참고문헌스러운 라인 비율을 보고 컷오프.
+    3) 과도 트림 방지: 전체의 60% 이전에서 자르지 않음.
+    ENV:
+      TRIM_BACKMATTER (true/false), BACKMATTER_MIN_POS_RATIO (0~1), BACKMATTER_TAIL_LINES (int)
+    """
+    if not text:
+        return text
+
+    enabled = os.getenv("TRIM_BACKMATTER", "true").lower() == "true"
+    if not enabled:
+        return text
+
+    import regex as re  # 더 강한 정규식 엔진이 있으면 좋지만, 없으면 re로 바꿔도 OK
+    MIN_POS_RATIO = float(os.getenv("BACKMATTER_MIN_POS_RATIO", "0.60"))  # 본문 60% 이후만 컷 허용
+    TAIL_LINES = int(os.getenv("BACKMATTER_TAIL_LINES", "400"))           # 아래쪽 스캔 라인 수
+    body_len = len(text)
+    min_pos = int(body_len * MIN_POS_RATIO)
+
+    # 1) 명시적 헤딩 매치 (멀티라인)
+    heading_re = re.compile(
+        r"(?m)^\s*(references|bibliography|appendix|appendices|acknowledg?e?ments)\s*$",
+        re.IGNORECASE
+    )
+    m = heading_re.search(text)
+    if m and m.start() >= min_pos:
+        return text[:m.start()].rstrip()
+
+    # 2) 아래쪽에서 위로 참고문헌 라인 비율 체크
+    #    패턴 예: [12] Foo..., 12. Bar..., (2019), 2019., doi:, arXiv:, Proc. of ...
+    ref_like_bul = re.compile(
+        r"^\s*(\[\d{1,3}\]|\d{1,3}\.|•|-)\s+.+", re.IGNORECASE
+    )
+    year_like = re.compile(r"\b(19[6-9]\d|20[0-4]\d)\b")
+    doi_like  = re.compile(r"\b(doi:|https?://(dx\.)?doi\.org/|arxiv:)\b", re.IGNORECASE)
+    proc_like = re.compile(r"\b(proceedings|proc\.|vol\.|no\.|pp\.)\b", re.IGNORECASE)
+
+    lines = text.splitlines()
+    n = len(lines)
+    start_line = max(0, n - TAIL_LINES)
+    tail = lines[start_line:]
+
+    def is_ref_line(line: str) -> bool:
+        l = line.strip()
+        if not l:
+            return False
+        hits = 0
+        if ref_like_bul.match(l): hits += 1
+        if year_like.search(l):   hits += 1
+        if doi_like.search(l):    hits += 1
+        if proc_like.search(l):   hits += 1
+        # 기준: 위 특징 중 2개 이상
+        return hits >= 2
+
+    # 아래쪽에서 위로 가면서 "연속적으로 참고문헌 같은" 구간의 시작 지점 찾기
+    ref_run = 0
+    run_needed = 6  # 최소 6줄 정도 연속으로 참고문헌 느낌이면 컷
+    cutoff_idx_in_tail = None
+
+    for i in range(len(tail) - 1, -1, -1):
+        if is_ref_line(tail[i]):
+            ref_run += 1
+        else:
+            if ref_run >= run_needed:
+                cutoff_idx_in_tail = i + 1
+                break
+            ref_run = 0
+
+    # 끝까지 왔을 때도 긴 러닝이 유지되면 tail 시작에서 컷
+    if cutoff_idx_in_tail is None and ref_run >= run_needed:
+        cutoff_idx_in_tail = 0
+
+    if cutoff_idx_in_tail is not None:
+        abs_cut = start_line + cutoff_idx_in_tail
+        # 과도 트림 방지
+        cut_pos = sum(len(l) + 1 for l in lines[:abs_cut])
+        if cut_pos >= min_pos:
+            return "\n".join(lines[:abs_cut]).rstrip()
+
+    return text
 
 def safe_year_guess(filename: str, text: str) -> str:
     cand = re.findall(r"\b(19[7-9]\d|20[0-4]\d|2025|2026)\b", filename + " " + text)
@@ -285,118 +418,368 @@ def find_paper_url(title: str, authors: str = "", year: str = "") -> str:
     except Exception: pass
     return ""
 
-# ── GPT Calls
 def call_gpt_meta(text_snippet: str) -> dict:
+    if not USE_GPT_API:
+        print("[META] USE_GPT_API=False → 테스트값 반환")
+        return {
+            "title": "Test Paper Title",
+            "authors": "Doe, J.; Smith, A.",
+            "year": "2023",
+            "conference_journal": "CHI Conference",
+            "tag": ["HCI", "haptics", "test"],
+        }
+
+    # 0) 입력 전처리/로그
     text_snippet = strip_unpaired_surrogates(text_snippet)
-    system_msg = "너는 논문 메타데이터 추출에 특화된 비서다. 반드시 유효한 JSON만 반환해라."
-    user_msg = f"""다음 논문 스니펫을 바탕으로 아래 키만 포함한 JSON을 만들어라.
-- title
-- authors
-- year
-- conference_journal
-- tag
+    #print("[META] snippet_head:", (text_snippet[:300] + " …") if len(text_snippet) > 300 else text_snippet)
 
-tag 생성 규칙:
-1) 스니펫의 "CCS Concepts" 또는 유사 섹션에서 1~6개 핵심 키워드를 추출(없으면 추정).
-2) 논문 분류용 태그 2~3개 추가(중복 금지).
-3) 결과: 평탄 배열의 tag. 텍스트만.
+    # 1) 프롬프트 파일 경로/내용 로드
+    base_dir  = os.getenv("PROMPT_DIR", "./prompts")
+    sys_path  = os.path.join(base_dir, os.getenv("PROMPT_META_SYSTEM", "meta.system.txt"))
+    user_path = os.path.join(base_dir, os.getenv("PROMPT_META_USER",   "meta.user.txt"))
+    #print("[META] system_path:", sys_path)
+    #print("[META] user_path  :", user_path)
 
-스니펫:
-\"\"\"{text_snippet}\"\"\""""
+    system_msg = read_text_file(sys_path)
+    user_tpl   = read_text_file(user_path)
+
+    if not system_msg:
+        system_msg = "너는 논문 메타데이터 추출 어시스턴트다. JSON만 반환하라."
+        print("[META][WARN] system prompt 파일 비어있음 → 기본 문구 사용")
+    if not user_tpl:
+        user_tpl = (
+            "다음 스니펫으로 title, authors, year, conference_journal, tag만 포함한 JSON을 만들어라.\n"
+            "\"\"\"{{TEXT_SNIPPET}}\"\"\""
+        )
+        print("[META][WARN] user prompt 파일 비어있음 → 기본 템플릿 사용")
+
+    user_msg = render_prompt(user_tpl, TEXT_SNIPPET=text_snippet)
+    #print("[META] system_msg_head:", (system_msg[:200] + " …") if len(system_msg) > 200 else system_msg)
+    #print("[META] user_msg_head  :", (user_msg[:200] + " …") if len(user_msg) > 200 else user_msg)
+
+    # 2) 호출
     resp = oai.chat.completions.create(
         model=OPENAI_MODEL,
-        messages=[{"role":"system","content":system_msg},{"role":"user","content":user_msg}],
-        temperature=0.2, response_format={"type":"json_object"}, max_tokens=OPENAI_MAX_TOKENS)
-    raw = resp.choices[0].message.content
-    try: return json.loads(raw)
-    except Exception: return {"title":"","authors":"","year":"","conference_journal":"","tag":[],"_raw":raw}
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user",   "content": user_msg},
+        ],
+        temperature=0.2,
+        response_format={"type": "json_object"},
+        max_tokens=OPENAI_MAX_TOKENS_META,
+    )
+    raw = resp.choices[0].message.content or "{}"
+    #print("[META] raw_resp:", raw)
+
+    # 3) 파싱(래핑/대소문자/동의어 보강)
+    try:
+        data = json.loads(raw)
+    except Exception as e:
+        print("[META][ERROR] JSON 파싱 실패:", e)
+        return {"title":"", "authors":"", "year":"", "conference_journal":"", "tag":[], "_raw": raw}
+
+    # 응답이 {"meta": {...}} 이거나 바로 {...} 일 수 있음
+    payload = data.get("meta") if isinstance(data, dict) else None
+    if not isinstance(payload, dict):
+        payload = data if isinstance(data, dict) else {}
+
+    # 키 정규화/동의어 맵핑
+    def _norm(s): return (s or "").strip().lower().replace(" ", "").replace("-", "_")
+    norm_map = { _norm(k): k for k in ["title","authors","year","conference_journal","tag"] }
+
+    # 동의어 → 표준키
+    syn = {
+        "conference": "conference_journal",
+        "venue": "conference_journal",
+        "journal": "conference_journal",
+        "conf": "conference_journal",
+    }
+
+    out = {"title":"", "authors":"", "year":"", "conference_journal":"", "tag":[]}
+
+    for k, v in payload.items():
+        nk = _norm(k)
+        if nk in norm_map:
+            key = norm_map[nk]
+        elif nk in syn:
+            key = syn[nk]
+        else:
+            continue  # 알 수 없는 키는 무시
+
+        # 값 후처리
+        if key == "tag":
+            if isinstance(v, (list, tuple, set)):
+                out["tag"] = [str(x).strip() for x in v if str(x).strip()]
+            elif isinstance(v, str):
+                out["tag"] = [x.strip() for x in v.split(",") if x.strip()]
+            else:
+                out["tag"] = []
+        elif key == "authors":
+            if isinstance(v, (list, tuple)):
+                out["authors"] = "; ".join([str(x).strip() for x in v if str(x).strip()])
+            else:
+                out["authors"] = str(v).strip()
+        else:
+            out[key] = str(v).strip()
+
+    # 4) 필드별 상태 로그
+    # print("[META] parsed =>",
+    #       "title=", bool(out["title"]), 
+    #       "authors=", bool(out["authors"]),
+    #       "year=", out["year"],
+    #       "conf_journal=", bool(out["conference_journal"]),
+    #       "tag_len=", len(out["tag"]))
+
+    # 5) 비어있는 필드 보조 추출(약식)
+    #  - PDF metadata에서도 종종 제목/저자 나옴
+    #  - 파일명/본문에서 연도 추정은 이미 elsewhere에서 수행
+    if (not out["title"] or not out["authors"]) and 'PdfReader' in globals():
+        # (선택) 필요 시 여기에 reader.metadata 추출 로직 추가 가능
+        pass
+
+    # 6) 최종 반환
+    return out
+
+
+
+
 
 def call_gpt_contents_marked(text_snippet: str) -> dict:
+    if not USE_GPT_API:
+        return {k: f"{k} : 테스트용 임의 내용입니다." for k in SECTION_KEYS}
+
     text_snippet = strip_unpaired_surrogates(text_snippet)
-    system_msg = "너는 논문 요약에 특화된 한국어 연구 비서다. 반드시 유효한 JSON만 반환해라."
-    user_msg = f"""
-다음 논문 스니펫을 바탕으로 'contents' 딕셔너리를 만들어라.
-키는 아래 6개를 정확히 사용(순서/철자 유지):
-- "1. 기존문제"
-- "2. 선행연구"
-- "3. 이번 연구의 개선점"
-- "4. 문제의 중요성"
-- "5. 제안 시스템/방법"
-- "6. 실험 가설/절차"
 
-규칙:
-- 각 값은 한국어 단락. 첫 문장은 '키 이름 : '로 시작. (예: "1. 기존문제 : ...")
-- **굵게**, __밑줄__, *이탤릭* 등 간단 마크다운 사용 OK.
-- 핵심 개념에는 강조를 적극 사용.
+    base_dir  = os.getenv("PROMPT_DIR", "./prompts")
+    sys_path  = os.path.join(base_dir, os.getenv("PROMPT_CONTENTS_SYSTEM", "contents.system.txt"))
+    user_path = os.path.join(base_dir, os.getenv("PROMPT_CONTENTS_USER",   "contents.user.txt"))
 
-스니펫:
-\"\"\"{text_snippet}\"\"\""""
+    #print(sys_path)
+    
+
+    system_msg = read_text_file(sys_path)
+    user_tpl   = read_text_file(user_path)
+
+    # 🔁 여기서 실제 논문 본문을 {{TEXT_SNIPPET}}에 꽂아 넣음
+    user_msg = render_prompt(user_tpl, TEXT_SNIPPET=text_snippet)
+    #print("[CONTENTS user_msg]\\n", user_msg[:600])
+
+    # (옵션) 치환이 안 된 자리표시자 남아있으면 경고/예외로 잡아내도 좋음
+    # if "{{TEXT_SNIPPET}}" in user_msg: raise ValueError("TEXT_SNIPPET 치환 실패: 템플릿/키 확인")
+
+    # 폴백
+    if not system_msg:
+        system_msg = "너는 논문 요약에 특화된 한국어 연구 비서다. 반드시 유효한 JSON만 반환해라."
+    if not user_msg:
+        user_msg = '다음 스니펫으로 "contents" 딕셔너리를 만들어라:\n"""' + text_snippet + '"""'
+
     resp = oai.chat.completions.create(
         model=OPENAI_MODEL,
-        messages=[{"role":"system","content":system_msg},{"role":"user","content":user_msg}],
-        temperature=0.2, response_format={"type":"json_object"}, max_tokens=2000)
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user",   "content": user_msg},
+        ],
+        temperature=0.2,
+        response_format={"type": "json_object"},
+        max_tokens=OPENAI_MAX_TOKENS_CONTENTS,
+    )
     raw = resp.choices[0].message.content
+    #print("[CONTENTS raw]\\n", raw)
     data = json.loads(raw)
+    
     contents = data.get("contents", data)
-    for k in SECTION_KEYS: contents.setdefault(k, "")
+    #print("[CONTENTS keys]", list(contents.keys()))
+    for k in SECTION_KEYS:
+        contents.setdefault(k, "")
     return contents
 
+
+
 def call_gpt_one_sentence(text_snippet: str) -> str:
+    if not USE_GPT_API:
+        return "테스트용 한줄 요약입니다."
+
     text_snippet = strip_unpaired_surrogates(text_snippet)
+
+    base_dir  = os.getenv("PROMPT_DIR", "./prompts")
+    sys_path  = os.path.join(base_dir, os.getenv("PROMPT_ONELINE_SYSTEM", "oneline.system.txt"))
+    user_path = os.path.join(base_dir, os.getenv("PROMPT_ONELINE_USER",   "oneline.user.txt"))
+
+    system_msg = read_text_file(sys_path) or "한 문장(30자 이내)만 반환하라."
+    user_tpl   = read_text_file(user_path) or '다음 텍스트를 30자 이내 한 문장으로 요약:\n"""{{TEXT_SNIPPET}}"""'
+
+    user_msg = render_prompt(user_tpl, TEXT_SNIPPET=text_snippet)
     resp = oai.chat.completions.create(
         model=OPENAI_MODEL,
-        messages=[{"role":"system","content":"한 문장(30자 이내)만 반환하라."},
-                  {"role":"user","content":f"다음 논문을 한글로 30자 이내 한 문장 요약:\n\"\"\"{text_snippet}\"\"\""}],
-        temperature=0.2, max_tokens=64)
-    return (resp.choices[0].message.content or "").strip().replace("\n"," ")
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user",   "content": user_msg},
+        ],
+        temperature=0.2,
+        max_tokens=OPENAI_MAX_TOKENS_ONESENTENCE,
+    )
+    return (resp.choices[0].message.content or "").strip().replace("\n", " ")
+
 
 def call_gpt_layout(contents: dict, figures: list[dict]) -> list[dict]:
-    def _brief(s: str, n: int = 900) -> str: return strip_unpaired_surrogates((s or "")[:n])
-    contents_brief = {k: _brief(contents.get(k, "")) for k in SECTION_KEYS}
-    fig_brief = [{"id": f.get("id"), "page": int(f.get("page", 0) or 0), "caption": _brief(f.get("caption_text",""), 400)} for f in figures]
+    """
+    목표:
+    - 섹션 순서(1→6) 고정
+    - 모든 figure를 정확히 1회씩 '관련 섹션 바로 뒤'에 배치 (GPT가 빼먹어도 코드가 강제 보정)
+    - 캡션/섹션 요약은 기본적으로 '전체' 사용 (ENV로 제한 가능)
+    - 풍부한 디버그 로그 출력
+    """
 
-    system_msg = "너는 논문 편집 레이아웃 어시스턴트다. 반드시 유효한 JSON만 반환하라."
-    user_msg = f"""
-아래 '섹션 요약'과 '피겨 목록'을 바탕으로, 독자가 읽기 자연스러운 레이아웃을 만들어라.
-출력은 반드시 {{"items":[ ... ]}} 형태의 JSON 객체.
-
-규칙:
-1) 섹션 6개를 이 순서로 모두 포함: {SECTION_KEYS}
-2) 피겨는 관련성 높은 섹션 '바로 뒤'에 분산 배치. 마지막에 몰아넣지 말 것.
-3) 아이템 형식:
-   - 섹션: {{"type":"section","key":"<섹션키>"}}
-   - 피겨:  {{"type":"figure","id":"<피겨 id>"}}
-4) 같은 피겨 id는 한 번만 사용.
-
-섹션 요약:
-{json.dumps(contents_brief, ensure_ascii=False, indent=2)}
-
-피겨 목록:
-{json.dumps(fig_brief, ensure_ascii=False, indent=2)}
-"""
-    resp = oai.chat_completions.create if hasattr(oai, "chat_completions") else oai.chat.completions.create
-    out = resp(model=OPENAI_MODEL,
-               messages=[{"role":"system","content":system_msg},{"role":"user","content":user_msg}],
-               temperature=0.2, response_format={"type":"json_object"}, max_tokens=1200)
-    raw = out.choices[0].message.content
+    # ====== 0) ENV로 길이 제어 (기본: 전체 사용) ======
     try:
-        data = json.loads(raw); items = data.get("items", [])
-        if not isinstance(items, list): raise ValueError("items not a list")
-        keys_in_order = [i.get("key") for i in items if i.get("type")=="section"]
-        if keys_in_order != SECTION_KEYS: raise ValueError("sections order invalid")
-        return items
+        MAX_SECTION_CHARS = int(os.getenv("PROMPT_SECTION_CHARS", "0"))  # 0이면 전체
+        MAX_CAPTION_CHARS = int(os.getenv("PROMPT_CAPTION_CHARS", "0"))  # 0이면 전체
     except Exception:
-        # 폴백: 섹션 전부 + 피겨를 5/6에 분산
-        base = [{"type":"section","key":k} for k in SECTION_KEYS]
-        m = len(figures)
-        left = [{"type":"figure","id":f["id"]} for f in figures[:m//2]]
-        right= [{"type":"figure","id":f["id"]} for f in figures[m//2:]]
-        out=[]
-        for it in base:
-            out.append(it)
-            if it["key"]=="5. 제안 시스템/방법": out.extend(left)
-            if it["key"]=="6. 실험 가설/절차": out.extend(right)
-        return out
+        MAX_SECTION_CHARS = 0
+        MAX_CAPTION_CHARS = 0
+
+    def _brief_full(s: str, n: int = 0) -> str:
+        s = strip_unpaired_surrogates(s or "")
+        return s if n <= 0 else s[:n]
+
+    # ====== 1) 입력 정리 (섹션/피겨 본문 그대로 투입) ======
+    contents_brief = {k: _brief_full(contents.get(k, ""), MAX_SECTION_CHARS) for k in SECTION_KEYS}
+    fig_brief = [{
+        "id": f.get("id"),
+        "page": int(f.get("page", 0) or 0),
+        # ▶ 캡션 전체 (자르지 않음; 필요시 ENV로 제한)
+        "caption": _brief_full(f.get("caption_text", ""), MAX_CAPTION_CHARS)
+    } for f in figures]
+
+    # ====== 2) 입력 로그 ======
+    #print("\n[LAYOUT] === SECTION BRIEF (요약/전체) ===")
+    for k in SECTION_KEYS:
+        txt = contents_brief.get(k, "")
+        #print(f"\n--- {k} ---\n{txt[:600]}{'...' if len(txt)>600 else ''}")
+
+    #print("\n[LAYOUT] === FIGURE BRIEF (캡션) ===")
+    for fb in fig_brief:
+        cap = fb.get("caption","")
+        #print(f"\n- {fb['id']}: {cap[:600]}{'...' if len(cap)>600 else ''}")
+
+    # ====== 3) GPT 호출 ======
+    base_dir  = os.getenv("PROMPT_DIR", "./prompts")
+    sys_path  = os.path.join(base_dir, os.getenv("PROMPT_LAYOUT_SYSTEM", "layout.system.txt"))
+    user_path = os.path.join(base_dir, os.getenv("PROMPT_LAYOUT_USER",   "layout.user.txt"))
+
+    system_msg = read_text_file(sys_path) or "너는 Notion 페이지 레이아웃을 설계하는 시스템이다. 반드시 JSON 객체만 반환하라."
+    user_tpl   = read_text_file(user_path) or (
+        # SECTION_KEYS도 템플릿에 넣어주기
+        "필수 규칙:\n1) 6개 섹션을 이 순서로 모두 포함: {{SECTION_KEYS}}\n"
+        "2) 모든 피겨 id를 정확히 한 번씩 포함\n\n"
+        "섹션 요약:\n{{CONTENTS_BRIEF_JSON}}\n\n피겨 목록:\n{{FIG_BRIEF_JSON}}"
+    )
+
+    user_msg = render_prompt(
+        user_tpl,
+        SECTION_KEYS=json.dumps(SECTION_KEYS, ensure_ascii=False),
+        CONTENTS_BRIEF_JSON=json.dumps(contents_brief, ensure_ascii=False, indent=2),
+        FIG_BRIEF_JSON=json.dumps(fig_brief, ensure_ascii=False, indent=2),
+    )
+
+    items_from_gpt = []
+    if USE_GPT_API:
+        try:
+            resp = oai.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[{"role":"system","content":system_msg},{"role":"user","content":user_msg}],
+                temperature=0.2,
+                response_format={"type":"json_object"},
+                max_tokens=OPENAI_MAX_TOKENS_LAYOUT,
+            )
+            raw = resp.choices[0].message.content or "{}"
+            data = json.loads(raw)
+            items_from_gpt = data.get("items", []) if isinstance(data, dict) else []
+        except Exception as e:
+            print(f"[LAYOUT][ERROR] GPT 호출/파싱 실패: {e}")
+    else:
+        print("[LAYOUT] USE_GPT_API=False → 임시 빈 레이아웃 사용")
+
+    # ====== 4) 정합성/클린업 (GPT 결과를 최대한 살리되, 누락 figure는 채움) ======
+    valid_ids = {f["id"] for f in figures}
+    # figure → 섹션 버킷
+    buckets: dict[str, list[str]] = {k: [] for k in SECTION_KEYS}
+    used_figs: set[str] = set()
+
+    # (A) GPT가 준 items를 훑어서, 섹션 바로 뒤에 온 figure만 해당 섹션 버킷에 담기
+    last_section = None
+    for it in items_from_gpt:
+        t = it.get("type")
+        if t == "section" and it.get("key") in SECTION_KEYS:
+            last_section = it["key"]
+        elif t == "figure":
+            fid = it.get("id")
+            if fid in valid_ids and fid not in used_figs and last_section in buckets:
+                buckets[last_section].append(fid)
+                used_figs.add(fid)
+            else:
+                # 무효/중복/섹션컨텍스트 없음 → 일단 패스(아래에서 보정)
+                pass
+
+    # (B) 누락 figure들 찾아서 휴리스틱으로 섹션 배정 (무조건 전부 포함되도록)
+    def _heuristic_section(cap: str) -> str:
+        c = (cap or "").lower()
+        # 실험/측정/결과/평가 → 섹션 6
+        if any(w in c for w in ["experiment", "user study", "measurement", "measured",
+                                "result", "evaluation", "participants", "task", "procedure", "accuracy", "comparison"]):
+            return "6. 실험 가설/절차"
+        # 방법/시스템/아키텍처 → 섹션 5
+        if any(w in c for w in ["method", "system", "architecture", "pipeline",
+                                "approach", "algorithm", "implementation", "design", "controller", "circuit"]):
+            return "5. 제안 시스템/방법"
+        # 선행/배경 → 섹션 2
+        if any(w in c for w in ["related", "prior", "previous", "background", "state-of-the-art"]):
+            return "2. 선행연구"
+        # 개선점/중요성 키워드
+        if any(w in c for w in ["improvement", "advantage", "novelty", "contribution"]):
+            return "3. 이번 연구의 개선점"
+        if any(w in c for w in ["motivation", "importance", "significance"]):
+            return "4. 문제의 중요성"
+        # 폴백: 5 (방법)
+        return "5. 제안 시스템/방법"
+
+    missing_ids = [fid for fid in valid_ids if fid not in used_figs]
+    if missing_ids:
+        print(f"[LAYOUT][WARN] GPT가 누락한 figure 수: {len(missing_ids)} → 휴리스틱으로 채움")
+    # 캡션 맵
+    cap_by_id = {fb["id"]: fb.get("caption","") for fb in fig_brief}
+    for fid in missing_ids:
+        sec = _heuristic_section(cap_by_id.get(fid, ""))
+        buckets[sec].append(fid)
+        used_figs.add(fid)
+        # 로그: 어떤 섹션으로 보정됐는지
+        cap = cap_by_id.get(fid, "")
+        print(f"[LAYOUT][FILL] figure={fid} → section='{sec}' by heuristic")
+        cap_snippet = cap[:200].replace("\n", " ")
+        print(f"  • caption: {cap_snippet}{'...' if len(cap) > 200 else ''}")
+
+
+    # ====== 5) 최종 items: 1→6 섹션을 고정 순서로 깔고, 각 섹션 뒤에 버킷 figure를 연달아 삽입 ======
+    final_items: list[dict] = []
+    for sec in SECTION_KEYS:
+        final_items.append({"type":"section","key":sec})
+        for fid in buckets[sec]:
+            final_items.append({"type":"figure","id":fid})
+
+    # ====== 6) 최종 시퀀스 로그 + 커버리지 검증 ======
+    seq = ["{sec:"+it["key"]+"}" if it["type"]=="section" else "{fig:"+it["id"]+"}" for it in final_items]
+    print("\n[LAYOUT] === FINAL ITEMS ORDER ===")
+    print(" ".join(seq))
+
+    placed_figs = [it["id"] for it in final_items if it["type"]=="figure"]
+    if set(placed_figs) != valid_ids or len(placed_figs) != len(valid_ids):
+        print("[LAYOUT][ERROR] figure 커버리지가 100%가 아님! (논리 점검 필요)")
+        print("  placed:", placed_figs)
+        print("  valid :", sorted(valid_ids))
+
+    return final_items
+
+
 
 # ── Figure 추출
 def get_text_blocks(page: "fitz.Page"):
@@ -543,7 +926,7 @@ def create_notion_page_with_layout(meta, contents, layout, figures_by_id, paper_
 def process_pdf(path: str):
     print(f"📄 Processing: {path}")
     text = strip_unpaired_surrogates(read_pdf(path))
-
+    print(text)
     try: meta = call_gpt_meta(text)
     except Exception as e:
         print(f"⚠️ GPT(meta) 오류: {e}"); meta = {"title":"","authors":"","year":"","conference_journal":"","tag":[]}
@@ -586,6 +969,8 @@ def process_pdf(path: str):
             if it["key"]=="5. 제안 시스템/방법": layout.extend(left)
             if it["key"]=="6. 실험 가설/절차": layout.extend(right)
 
+    for k in SECTION_KEYS:
+        print("LEN", k, len(s(contents.get(k, ""))))
     try:
         res = create_notion_page_with_layout(meta, contents, layout, figures_by_id, paper_url, pdf_block, file_hint=path)
         print(f"✅ Added to Notion: {res.get('url')}\n")

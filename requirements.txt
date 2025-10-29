@@ -4,3 +4,4 @@ pypdf>=4.2.0
 notion-client>=2.2.1
 openai>=1.45.0
 PyMuPDF>=1.24.9           # fitz
+regex>=2023.8.8

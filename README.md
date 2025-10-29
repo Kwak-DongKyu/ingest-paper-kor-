@@ -44,7 +44,7 @@ pip install -r requirements.txt
 **3.1 (NOTION_TOKEN) 아래 사이트에서 API 키 발급 및 데이터베이스를 수정할 권한을 부여해야 함.** 
 https://www.notion.so/profile/integrations
 
-- 새 API 통합 버튼 클릭
+- 새 API 통합 버튼 클릭cvf
 - 이후 생성된 API 키를 .env 파일의 NOTION_TOKEN 에 입력
 ![Notion Integrations 페이지](Image/notion1.png)
 

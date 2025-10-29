@@ -1,0 +1,11 @@
+다음 논문 스니펫을 바탕으로 아래 키만 포함한 JSON을 만들어라.
+- title
+- authors
+- year
+- conference_journal
+- tag
+
+
+
+스니펫:
+"""{{TEXT_SNIPPET}}"""
